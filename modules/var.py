@@ -28,6 +28,13 @@ from utils.portfolio_utils import (
     validate_tickers,
     display_and_save_results,
 )
+from utils.currency_converter import (
+    convert_prices_to_currency,
+    format_currency_value,
+    format_currency_value_with_sign,
+    get_currency_symbol,
+    print_currency_conversion_info,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -192,8 +199,10 @@ def run_var(args):
     print(f"Method: {args.method.title()}")
     print(f"Confidence Level: {args.confidence}%")
     print(f"Time Horizon: {args.days} day(s)")
+    print(f"Portfolio Currency: {args.currency}")
 
     tickers = validate_tickers(args.tickers)
+    currency_symbol = get_currency_symbol(args.currency)
 
     # Determine weights and values using shared utility
     try:
@@ -206,10 +215,12 @@ def run_var(args):
         args.portfolio_value = portfolio_value
 
         # Display portfolio configuration
-        print(f"Portfolio Value: ${portfolio_value:,.2f}")
+        print(
+            f"Portfolio Value: {format_currency_value(portfolio_value, args.currency)}"
+        )
         if hasattr(args, "values") and args.values:
             print(
-                f"Position Values: {', '.join(f'{t}=${v:,.2f}' for t, v in zip(tickers, args.values))}\n"
+                f"Position Values: {', '.join(f'{t}={format_currency_value(v, args.currency)}' for t, v in zip(tickers, args.values))}\n"
             )
         elif hasattr(args, "weights") and args.weights:
             print(
@@ -223,9 +234,28 @@ def run_var(args):
         print(f"❌ Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Fetch historical returns
+    # Fetch historical data and convert currencies
     print("Fetching historical data...")
-    returns = fetch_historical_returns(tickers)
+    prices = fetch_historical_data(
+        tickers, period=VAR_HISTORICAL_DATA_PERIOD, return_prices=True
+    )
+
+    if prices is None:
+        sys.exit(1)
+
+    # Convert prices to portfolio currency using historical exchange rates
+    try:
+        converted_prices, exchange_rates = convert_prices_to_currency(
+            prices, tickers, args.currency, period=VAR_HISTORICAL_DATA_PERIOD
+        )
+        print_currency_conversion_info(tickers, args.currency, exchange_rates)
+    except ValueError as e:
+        logger.error(str(e))
+        print(f"❌ Currency conversion error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Calculate returns from converted prices
+    returns = converted_prices.pct_change(fill_method=None).dropna()
 
     results = []
 
@@ -311,14 +341,18 @@ def run_var(args):
             )
         )
 
-    # Create DataFrame
+    # Create DataFrame with currency-aware formatting
     df = pd.DataFrame(
         [
             {
                 "Ticker": r.ticker,
                 "Method": r.method,
-                "Position Value": f"${r.position_value:,.2f}",
-                f"VaR ({r.confidence}%)": f"${r.var_amount:,.2f}",
+                "Position Value": format_currency_value(
+                    r.position_value, args.currency
+                ),
+                f"VaR ({r.confidence}%)": format_currency_value(
+                    r.var_amount, args.currency
+                ),
                 "VaR %": f"{r.var_percentage:.2f}%",
                 "Days": r.days,
             }
@@ -334,7 +368,7 @@ def run_var(args):
     if len(tickers) == 1:
         print(f"   With {args.confidence}% confidence, you will not lose more than")
         print(
-            f"   ${results[0].var_amount:,.2f} ({results[0].var_percentage:.2f}%) over {args.days} day(s)."
+            f"   {format_currency_value(results[0].var_amount, args.currency)} ({results[0].var_percentage:.2f}%) over {args.days} day(s)."
         )
     else:
         portfolio_var = results[-1]
@@ -342,5 +376,5 @@ def run_var(args):
             f"   Portfolio VaR: With {args.confidence}% confidence, you will not lose more than"
         )
         print(
-            f"   ${portfolio_var.var_amount:,.2f} ({portfolio_var.var_percentage:.2f}%) over {args.days} day(s)."
+            f"   {format_currency_value(portfolio_var.var_amount, args.currency)} ({portfolio_var.var_percentage:.2f}%) over {args.days} day(s)."
         )

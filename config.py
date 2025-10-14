@@ -116,6 +116,18 @@ DEFAULT_STRESS_OUTPUT = "stress_test_results.csv"
 
 
 # =============================================================================
+# CURRENCY CONSTANTS
+# =============================================================================
+
+# Supported currencies for portfolio analysis
+# These are currencies with reliable historical exchange rate data on Yahoo Finance
+SUPPORTED_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF"]
+
+# Default portfolio currency
+DEFAULT_CURRENCY = "USD"
+
+
+# =============================================================================
 # VALIDATION CONSTANTS
 # =============================================================================
 

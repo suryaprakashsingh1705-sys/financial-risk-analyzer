@@ -30,10 +30,15 @@ from config import (
 from utils.portfolio_utils import (
     fetch_historical_data,
     calculate_portfolio_weights,
-    format_currency,
-    format_currency_with_sign,
     validate_tickers,
     display_and_save_results,
+)
+from utils.currency_converter import (
+    convert_prices_to_currency,
+    format_currency_value,
+    format_currency_value_with_sign,
+    get_currency_symbol,
+    print_currency_conversion_info,
 )
 
 # Configure logging
@@ -153,6 +158,7 @@ def run_single_scenario(
     weights: np.ndarray,
     portfolio_value: float,
     scenario: CrisisScenario,
+    currency: str = "USD",
 ) -> List[StressTestResult]:
     """Run stress test for a single crisis scenario."""
     print(f"\n{'='*80}")
@@ -167,6 +173,26 @@ def run_single_scenario(
     if prices is None or prices.empty:
         print(f"⚠️  Warning: No data available for this period\n")
         return []
+
+    # Convert prices to portfolio currency using historical exchange rates
+    try:
+        converted_prices, exchange_rates = convert_prices_to_currency(
+            prices,
+            tickers,
+            currency,
+            start_date=scenario.start_date,
+            end_date=scenario.end_date,
+        )
+        # Only print conversion info once per scenario
+        if len([t for t in tickers if t in converted_prices.columns]) > 0:
+            print_currency_conversion_info(tickers, currency, exchange_rates)
+    except ValueError as e:
+        logger.error(str(e))
+        print(f"❌ Currency conversion error: {e}", file=sys.stderr)
+        return []
+
+    # Use converted prices for analysis
+    prices = converted_prices
 
     results = []
 
@@ -233,8 +259,10 @@ def run_stress_test(args):
     """Main function to run stress test analysis."""
     logger.info("Starting Historical Stress Test Analysis")
     print("🔬 Running Historical Stress Test Analysis...\n")
+    print(f"Portfolio Currency: {args.currency}")
 
     tickers = validate_tickers(args.tickers)
+    currency_symbol = get_currency_symbol(args.currency)
 
     # Determine weights and values using shared utility
     try:
@@ -247,11 +275,13 @@ def run_stress_test(args):
         args.portfolio_value = portfolio_value
 
         # Display portfolio configuration
-        print(f"Portfolio Value: ${portfolio_value:,.2f}")
+        print(
+            f"Portfolio Value: {format_currency_value(portfolio_value, args.currency)}"
+        )
         print(f"Tickers: {', '.join(tickers)}")
         if hasattr(args, "values") and args.values:
             print(
-                f"Position Values: {', '.join(f'{t}=${v:,.2f}' for t, v in zip(tickers, args.values))}\n"
+                f"Position Values: {', '.join(f'{t}={format_currency_value(v, args.currency)}' for t, v in zip(tickers, args.values))}\n"
             )
         elif hasattr(args, "weights") and args.weights:
             print(f"Weights: {', '.join(f'{w:.1%}' for w in weights)}\n")
@@ -274,7 +304,7 @@ def run_stress_test(args):
     # Run stress tests
     for scenario in scenarios_to_run:
         scenario_results = run_single_scenario(
-            tickers, weights, args.portfolio_value, scenario
+            tickers, weights, args.portfolio_value, scenario, args.currency
         )
         all_results.extend(scenario_results)
 
@@ -290,10 +320,14 @@ def run_stress_test(args):
                 [
                     {
                         "Ticker": r.ticker,
-                        "Start Price": f"${r.start_price:.2f}",
-                        "End Price": f"${r.end_price:.2f}",
+                        "Start Price": format_currency_value(
+                            r.start_price, args.currency
+                        ),
+                        "End Price": format_currency_value(r.end_price, args.currency),
                         "Return": f"{r.return_pct:+.2f}%",
-                        "Gain/Loss": format_currency_with_sign(r.loss_amount),
+                        "Gain/Loss": format_currency_value_with_sign(
+                            r.loss_amount, args.currency
+                        ),
                         "Max Drawdown": f"{r.max_drawdown:.2f}%",
                     }
                     for r in individual_results
@@ -311,20 +345,22 @@ def run_stress_test(args):
                     f"   Portfolio Return (with correlations): {port.return_pct:+.2f}%"
                 )
                 print(
-                    f"   Portfolio Gain/Loss: {format_currency_with_sign(port.loss_amount)}"
+                    f"   Portfolio Gain/Loss: {format_currency_value_with_sign(port.loss_amount, args.currency)}"
                 )
                 print(f"   Portfolio Max Drawdown: {port.max_drawdown:.2f}%")
                 print(
-                    f"   Final Portfolio Value: {format_currency(port.position_value_end)}"
+                    f"   Final Portfolio Value: {format_currency_value(port.position_value_end, args.currency)}"
                 )
             else:
                 # Fallback for single ticker
                 total_gain = sum(r.loss_amount for r in individual_results)
                 portfolio_return = (total_gain / args.portfolio_value) * 100
-                print(f"   Total Gain/Loss: {format_currency_with_sign(total_gain)}")
+                print(
+                    f"   Total Gain/Loss: {format_currency_value_with_sign(total_gain, args.currency)}"
+                )
                 print(f"   Portfolio Return: {portfolio_return:+.2f}%")
                 print(
-                    f"   Final Portfolio Value: {format_currency(args.portfolio_value + total_gain)}"
+                    f"   Final Portfolio Value: {format_currency_value(args.portfolio_value + total_gain, args.currency)}"
                 )
 
     if not all_results:
@@ -340,12 +376,18 @@ def run_stress_test(args):
             {
                 "Ticker": r.ticker,
                 "Scenario": r.scenario,
-                "Start Price": format_currency(r.start_price),
-                "End Price": format_currency(r.end_price),
+                "Start Price": format_currency_value(r.start_price, args.currency),
+                "End Price": format_currency_value(r.end_price, args.currency),
                 "Return %": f"{r.return_pct:+.2f}%",
-                "Position Start": format_currency(r.position_value_start),
-                "Position End": format_currency(r.position_value_end),
-                "Gain/Loss": format_currency_with_sign(r.loss_amount),
+                "Position Start": format_currency_value(
+                    r.position_value_start, args.currency
+                ),
+                "Position End": format_currency_value(
+                    r.position_value_end, args.currency
+                ),
+                "Gain/Loss": format_currency_value_with_sign(
+                    r.loss_amount, args.currency
+                ),
                 "Max Drawdown": f"{r.max_drawdown:.2f}%",
             }
             for r in all_results
@@ -366,7 +408,7 @@ def run_stress_test(args):
 
     print(f"   Worst Loss: {worst_scenario.ticker} in {worst_scenario.scenario}")
     print(
-        f"   Loss: {format_currency_with_sign(worst_scenario.loss_amount)} ({worst_scenario.return_pct:+.2f}%)"
+        f"   Loss: {format_currency_value_with_sign(worst_scenario.loss_amount, args.currency)} ({worst_scenario.return_pct:+.2f}%)"
     )
     print(f"   Max Drawdown: {worst_scenario.max_drawdown:.2f}%")
 
@@ -375,5 +417,5 @@ def run_stress_test(args):
             f"\n   Best Performance: {best_scenario.ticker} in {best_scenario.scenario}"
         )
         print(
-            f"   Gain: {format_currency_with_sign(best_scenario.loss_amount)} ({best_scenario.return_pct:+.2f}%)"
+            f"   Gain: {format_currency_value_with_sign(best_scenario.loss_amount, args.currency)} ({best_scenario.return_pct:+.2f}%)"
         )

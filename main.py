@@ -9,6 +9,7 @@ Provides multiple financial analysis tools:
 """
 import argparse
 import sys
+from config import SUPPORTED_CURRENCIES, DEFAULT_CURRENCY
 
 
 def main():
@@ -76,7 +77,7 @@ Examples:
         "--portfolio-value",
         type=float,
         default=100000,
-        help="Portfolio value in USD. Default: 100000",
+        help="Portfolio value in specified currency. Default: 100000",
     )
     var_parser.add_argument(
         "--weights",
@@ -88,7 +89,13 @@ Examples:
         "--values",
         nargs="+",
         type=float,
-        help="Position values in USD for each ticker. Overrides --portfolio-value and --weights",
+        help="Position values in portfolio currency for each ticker. Overrides --portfolio-value and --weights",
+    )
+    var_parser.add_argument(
+        "--currency",
+        choices=SUPPORTED_CURRENCIES,
+        default=DEFAULT_CURRENCY,
+        help=f"Portfolio currency ({', '.join(SUPPORTED_CURRENCIES)}). Default: {DEFAULT_CURRENCY}",
     )
     var_parser.add_argument("--out", default="var_results.csv", help="Output CSV file")
 
@@ -109,7 +116,7 @@ Examples:
         "--portfolio-value",
         type=float,
         default=100000,
-        help="Portfolio value in USD. Default: 100000",
+        help="Portfolio value in specified currency. Default: 100000",
     )
     stress_parser.add_argument(
         "--weights",
@@ -121,7 +128,13 @@ Examples:
         "--values",
         nargs="+",
         type=float,
-        help="Position values in USD for each ticker. Overrides --portfolio-value and --weights",
+        help="Position values in portfolio currency for each ticker. Overrides --portfolio-value and --weights",
+    )
+    stress_parser.add_argument(
+        "--currency",
+        choices=SUPPORTED_CURRENCIES,
+        default=DEFAULT_CURRENCY,
+        help=f"Portfolio currency ({', '.join(SUPPORTED_CURRENCIES)}). Default: {DEFAULT_CURRENCY}",
     )
     stress_parser.add_argument(
         "--out", default="stress_test_results.csv", help="Output CSV file"
