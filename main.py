@@ -138,33 +138,43 @@ Examples:
         # Validate confidence level for VaR
         if args.command == "var":
             if args.confidence <= 0 or args.confidence >= 100:
-                parser.error(f"Confidence level must be between 0 and 100 (got {args.confidence})")
+                parser.error(
+                    f"Confidence level must be between 0 and 100 (got {args.confidence})"
+                )
 
             if args.days <= 0:
                 parser.error(f"Days must be positive (got {args.days})")
 
             if args.days > 365:
-                print(f"⚠️  Warning: {args.days} days is a very long time horizon. Results may be unreliable.", file=sys.stderr)
+                print(
+                    f"⚠️  Warning: {args.days} days is a very long time horizon. Results may be unreliable.",
+                    file=sys.stderr,
+                )
 
         # Validate portfolio value
-        if hasattr(args, 'portfolio_value') and args.portfolio_value <= 0:
-            parser.error(f"Portfolio value must be positive (got {args.portfolio_value})")
+        if hasattr(args, "portfolio_value") and args.portfolio_value <= 0:
+            parser.error(
+                f"Portfolio value must be positive (got {args.portfolio_value})"
+            )
 
         # Validate weights
-        if hasattr(args, 'weights') and args.weights:
+        if hasattr(args, "weights") and args.weights:
             if any(w < 0 for w in args.weights):
                 parser.error("Weights cannot be negative")
             if any(w > 1 for w in args.weights):
                 parser.error("Individual weights cannot exceed 1.0")
 
         # Validate values
-        if hasattr(args, 'values') and args.values:
+        if hasattr(args, "values") and args.values:
             if any(v <= 0 for v in args.values):
                 parser.error("Position values must be positive")
 
             # Check for conflicting options
-            if hasattr(args, 'weights') and args.weights:
-                print("⚠️  Warning: Both --values and --weights specified. Using --values.", file=sys.stderr)
+            if hasattr(args, "weights") and args.weights:
+                print(
+                    "⚠️  Warning: Both --values and --weights specified. Using --values.",
+                    file=sys.stderr,
+                )
 
     # Validate tickers
     if args.command in ["zscore", "var", "stress"]:
@@ -175,20 +185,24 @@ Examples:
     try:
         if args.command == "zscore":
             from modules.zscore import run_zscore
+
             run_zscore(args)
         elif args.command == "var":
             from modules.var import run_var
+
             run_var(args)
         elif args.command == "stress":
             from modules.stress_test import run_stress_test
+
             run_stress_test(args)
     except KeyboardInterrupt:
         print("\n\n⚠️  Operation cancelled by user", file=sys.stderr)
         sys.exit(130)
     except Exception as e:
         print(f"\n❌ Fatal error: {e}", file=sys.stderr)
-        if hasattr(args, 'debug') and args.debug:
+        if hasattr(args, "debug") and args.debug:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 

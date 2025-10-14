@@ -207,6 +207,7 @@ financial-risk-analyzer/
 ├── utils/
 │   ├── __init__.py
 │   ├── data_fetcher.py    # Yahoo Finance data fetching
+│   ├── portfolio_utils.py    # Portfolio utilities
 │   └── helpers.py         # Classification & utilities
 ├── config.py              # Configuration constants
 ├── requirements.txt
@@ -251,7 +252,7 @@ python main.py zscore TSLA AAPL MSFT --verbose
 python main.py var TSLA AAPL MSFT --values 40000 35000 25000
 
 # 3. Test historical resilience with same allocation
-python main.py stress TSLA AAPL MSFT --values 40000 35000 25000 --scenario all
+python main.py stress TSLA AAPL MSFT --values 40000 35000 25000 --scenario covid
 ```
 
 **Example Output**:

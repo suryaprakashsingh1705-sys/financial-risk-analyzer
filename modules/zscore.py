@@ -14,20 +14,25 @@ import logging
 
 from utils.data_fetcher import fetch_company_info, fetch_financial_components
 from utils.helpers import detect_market_region, get_company_profile
+from utils.portfolio_utils import display_and_save_results
 from config import (
-    ZSCORE_ORIGINAL_WC_COEF, ZSCORE_ORIGINAL_RE_COEF, ZSCORE_ORIGINAL_EBIT_COEF,
-    ZSCORE_ORIGINAL_MVE_COEF, ZSCORE_ORIGINAL_SALES_COEF,
-    ZSCORE_MODIFIED_WC_COEF, ZSCORE_MODIFIED_RE_COEF, ZSCORE_MODIFIED_EBIT_COEF,
+    ZSCORE_ORIGINAL_WC_COEF,
+    ZSCORE_ORIGINAL_RE_COEF,
+    ZSCORE_ORIGINAL_EBIT_COEF,
+    ZSCORE_ORIGINAL_MVE_COEF,
+    ZSCORE_ORIGINAL_SALES_COEF,
+    ZSCORE_MODIFIED_WC_COEF,
+    ZSCORE_MODIFIED_RE_COEF,
+    ZSCORE_MODIFIED_EBIT_COEF,
     ZSCORE_MODIFIED_BVE_COEF,
-    ZSCORE_ORIGINAL_DISTRESS_THRESHOLD, ZSCORE_ORIGINAL_GREY_THRESHOLD,
-    ZSCORE_MODIFIED_DISTRESS_THRESHOLD, ZSCORE_MODIFIED_GREY_THRESHOLD,
+    ZSCORE_ORIGINAL_DISTRESS_THRESHOLD,
+    ZSCORE_ORIGINAL_GREY_THRESHOLD,
+    ZSCORE_MODIFIED_DISTRESS_THRESHOLD,
+    ZSCORE_MODIFIED_GREY_THRESHOLD,
 )
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s: %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -161,7 +166,9 @@ def analyze_ticker(
                 components["tl"],
             )
 
-        logger.info(f"{ticker}: Z-Score = {z_score:.2f}, Zone = {get_zone(z_score, model)}")
+        logger.info(
+            f"{ticker}: Z-Score = {z_score:.2f}, Zone = {get_zone(z_score, model)}"
+        )
 
         return ZScoreResult(
             ticker=ticker,
@@ -221,10 +228,5 @@ def run_zscore(args):
         ]
     )
 
-    # Display results
-    print(df.to_string(index=False))
-
-    # Save to CSV
-    df.to_csv(args.out, index=False)
-    logger.info(f"Results saved to {args.out}")
-    print(f"\n✅ Results saved to {args.out}")
+    # Display and save results
+    display_and_save_results(df, args.out, separator=False)

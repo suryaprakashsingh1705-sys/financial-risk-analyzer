@@ -82,7 +82,7 @@ CRISIS_COVID_MARKET_DROP = -33.9  # S&P 500 drop percentage
 # PPE (Property, Plant & Equipment) Ratio Thresholds
 # Used to distinguish fab-owning semiconductor manufacturers from fabless designers
 PPE_RATIO_HIGH_THRESHOLD = 0.30  # >30% indicates manufacturing (owns fabs)
-PPE_RATIO_LOW_THRESHOLD = 0.10   # <10% indicates fabless (design only)
+PPE_RATIO_LOW_THRESHOLD = 0.10  # <10% indicates fabless (design only)
 
 # Classification Score Boosts
 FAB_SCORE_BOOST_HIGH = 3  # Strong indicator of manufacturing
@@ -96,7 +96,7 @@ FABLESS_SCORE_BOOST = 2  # Strong indicator of fabless
 
 # yfinance Settings
 YFINANCE_PROGRESS_BAR = False  # Disable progress bar for downloads
-YFINANCE_AUTO_ADJUST = True   # Auto-adjust prices for splits/dividends
+YFINANCE_AUTO_ADJUST = True  # Auto-adjust prices for splits/dividends
 
 
 # =============================================================================

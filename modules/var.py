@@ -11,22 +11,26 @@ from dataclasses import dataclass
 from typing import List, Dict
 import numpy as np
 import pandas as pd
-import yfinance as yf
 from scipy import stats
 import sys
 import logging
 
 from config import (
-    VAR_DEFAULT_CONFIDENCE, VAR_DEFAULT_DAYS, VAR_DEFAULT_PORTFOLIO_VALUE,
-    MONTE_CARLO_DEFAULT_SIMULATIONS, VAR_HISTORICAL_DATA_PERIOD,
-    YFINANCE_PROGRESS_BAR, YFINANCE_AUTO_ADJUST,
+    VAR_DEFAULT_CONFIDENCE,
+    VAR_DEFAULT_DAYS,
+    VAR_DEFAULT_PORTFOLIO_VALUE,
+    MONTE_CARLO_DEFAULT_SIMULATIONS,
+    VAR_HISTORICAL_DATA_PERIOD,
+)
+from utils.portfolio_utils import (
+    fetch_historical_data,
+    calculate_portfolio_weights,
+    validate_tickers,
+    display_and_save_results,
 )
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s: %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -41,70 +45,17 @@ class VaRResult:
     position_value: float
 
 
-def fetch_historical_returns(tickers: List[str], period: str = VAR_HISTORICAL_DATA_PERIOD) -> pd.DataFrame:
+def fetch_historical_returns(
+    tickers: List[str], period: str = VAR_HISTORICAL_DATA_PERIOD
+) -> pd.DataFrame:
     """Fetch historical price data and calculate returns."""
-    try:
-        logger.info(f"Fetching {period} of historical data for {len(tickers)} ticker(s)...")
-        data = yf.download(tickers, period=period, progress=YFINANCE_PROGRESS_BAR, auto_adjust=YFINANCE_AUTO_ADJUST)
+    logger.info(f"Fetching {period} of historical data for {len(tickers)} ticker(s)...")
+    returns = fetch_historical_data(tickers, period=period, return_prices=False)
 
-        # Handle different data structures based on number of tickers
-        if len(tickers) == 1:
-            # Single ticker - yfinance may return MultiIndex or regular DataFrame
-            if isinstance(data, pd.Series):
-                # If it's a Series, convert to DataFrame
-                prices = data.to_frame(name=tickers[0])
-            elif isinstance(data.columns, pd.MultiIndex):
-                # MultiIndex columns like ('Close', 'AAPL')
-                if 'Close' in [col[0] for col in data.columns]:
-                    # Extract Close prices (already a DataFrame)
-                    prices = data['Close']
-                    # Rename column to just the ticker name
-                    if isinstance(prices, pd.DataFrame):
-                        prices.columns = [tickers[0]]
-                    else:
-                        prices = prices.to_frame(name=tickers[0])
-                else:
-                    prices = data.iloc[:, 0].to_frame(name=tickers[0])
-            elif "Close" in data.columns:
-                # Regular DataFrame with Close column
-                prices = data["Close"].to_frame(name=tickers[0])
-            else:
-                # Already a DataFrame with price data
-                prices = data
-                if prices.shape[1] == 1 and prices.columns[0] != tickers[0]:
-                    prices.columns = [tickers[0]]
-        else:
-            # Multiple tickers - returns MultiIndex DataFrame
-            if isinstance(data.columns, pd.MultiIndex):
-                # Extract Close prices from MultiIndex
-                prices = data['Close']
-            elif "Close" in data.columns:
-                prices = data["Close"]
-            elif "Adj Close" in data.columns:
-                prices = data["Adj Close"]
-            else:
-                # Data might already be just the Close prices
-                prices = data
-
-        # Calculate daily returns
-        returns = prices.pct_change().dropna()
-
-        # Verify we have valid data
-        if returns.empty:
-            raise ValueError("No valid return data available")
-
-        logger.info(f"Successfully fetched {len(returns)} days of return data")
-        return returns
-
-    except Exception as e:
-        logger.error(f"Error fetching historical data: {e}")
-        print(f"❌ Error fetching data: {e}", file=sys.stderr)
-        print(f"\nTroubleshooting:", file=sys.stderr)
-        print(f"  - Check that all tickers are valid Yahoo Finance symbols", file=sys.stderr)
-        print(f"  - Try with fewer tickers to identify the problem", file=sys.stderr)
-        print(f"  - Some tickers may not have {period} of history available", file=sys.stderr)
-        print(f"  - Verify your internet connection", file=sys.stderr)
+    if returns is None:
         sys.exit(1)
+
+    return returns
 
 
 def calculate_parametric_var(
@@ -155,9 +106,11 @@ def calculate_historical_var(
     if days > 1:
         # Compound returns properly for multi-day periods (geometric returns)
         # (1+r1)*(1+r2)*...*(1+rn) - 1
-        scaled_returns = returns.rolling(window=days).apply(
-            lambda x: np.prod(1 + x) - 1, raw=False
-        ).dropna()
+        scaled_returns = (
+            returns.rolling(window=days)
+            .apply(lambda x: np.prod(1 + x) - 1, raw=False)
+            .dropna()
+        )
     else:
         scaled_returns = returns
 
@@ -240,52 +193,35 @@ def run_var(args):
     print(f"Confidence Level: {args.confidence}%")
     print(f"Time Horizon: {args.days} day(s)")
 
-    tickers = [t.upper() for t in args.tickers]
+    tickers = validate_tickers(args.tickers)
 
-    # Determine weights and values
-    if hasattr(args, 'values') and args.values:
-        # Value-based input
-        if len(args.values) != len(tickers):
-            logger.error(f"Number of values ({len(args.values)}) must match number of tickers ({len(tickers)})")
+    # Determine weights and values using shared utility
+    try:
+        weights, portfolio_value = calculate_portfolio_weights(
+            tickers,
+            weights=getattr(args, "weights", None),
+            values=getattr(args, "values", None),
+            portfolio_value=getattr(args, "portfolio_value", None),
+        )
+        args.portfolio_value = portfolio_value
+
+        # Display portfolio configuration
+        print(f"Portfolio Value: ${portfolio_value:,.2f}")
+        if hasattr(args, "values") and args.values:
             print(
-                f"❌ Error: Number of values ({len(args.values)}) must match number of tickers ({len(tickers)})",
-                file=sys.stderr,
+                f"Position Values: {', '.join(f'{t}=${v:,.2f}' for t, v in zip(tickers, args.values))}\n"
             )
-            sys.exit(1)
-
-        total_value = sum(args.values)
-        weights = np.array([v / total_value for v in args.values])
-        args.portfolio_value = total_value
-
-        logger.info(f"Using value-based allocation: Total portfolio value = ${total_value:,.2f}")
-        print(f"Portfolio Value: ${total_value:,.2f}")
-        print(f"Position Values: {', '.join(f'{t}=${v:,.2f}' for t, v in zip(tickers, args.values))}\n")
-
-    elif hasattr(args, 'weights') and args.weights:
-        # Weight-based input
-        if len(args.weights) != len(tickers):
-            logger.error(f"Number of weights ({len(args.weights)}) must match number of tickers ({len(tickers)})")
+        elif hasattr(args, "weights") and args.weights:
             print(
-                f"❌ Error: Number of weights ({len(args.weights)}) must match number of tickers ({len(tickers)})",
-                file=sys.stderr,
+                f"Weights: {', '.join(f'{t}={w:.1%}' for t, w in zip(tickers, weights))}\n"
             )
-            sys.exit(1)
-        if not np.isclose(sum(args.weights), 1.0):
-            logger.error(f"Weights must sum to 1.0 (currently sum to {sum(args.weights):.4f})")
-            print(
-                f"❌ Error: Weights must sum to 1.0 (currently sum to {sum(args.weights):.4f})",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        weights = np.array(args.weights)
+        else:
+            print(f"Weights: Equal ({1.0/len(tickers):.1%} each)\n")
 
-        logger.info(f"Using weight-based allocation: {', '.join(f'{t}={w:.1%}' for t, w in zip(tickers, weights))}")
-        print(f"Portfolio Value: ${args.portfolio_value:,.2f}\n")
-    else:
-        # Equal weights (default)
-        weights = np.array([1.0 / len(tickers)] * len(tickers))
-        logger.info(f"Using equal weights for {len(tickers)} ticker(s)")
-        print(f"Portfolio Value: ${args.portfolio_value:,.2f}\n")
+    except ValueError as e:
+        logger.error(str(e))
+        print(f"❌ Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # Fetch historical returns
     print("Fetching historical data...")
@@ -390,10 +326,8 @@ def run_var(args):
         ]
     )
 
-    # Display results
-    print("\n" + "=" * 80)
-    print(df.to_string(index=False))
-    print("=" * 80)
+    # Display and save results
+    display_and_save_results(df, args.out)
 
     # Interpretation
     print(f"\n💡 Interpretation:")
@@ -410,7 +344,3 @@ def run_var(args):
         print(
             f"   ${portfolio_var.var_amount:,.2f} ({portfolio_var.var_percentage:.2f}%) over {args.days} day(s)."
         )
-
-    # Save to CSV
-    df.to_csv(args.out, index=False)
-    print(f"\n✅ Results saved to {args.out}")

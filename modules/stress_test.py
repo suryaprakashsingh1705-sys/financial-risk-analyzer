@@ -11,24 +11,33 @@ from dataclasses import dataclass
 from typing import List, Dict
 import numpy as np
 import pandas as pd
-import yfinance as yf
 from datetime import datetime
 import sys
 import logging
 
 from config import (
     STRESS_DEFAULT_PORTFOLIO_VALUE,
-    CRISIS_DOTCOM_START, CRISIS_DOTCOM_END, CRISIS_DOTCOM_MARKET_DROP,
-    CRISIS_GFC_START, CRISIS_GFC_END, CRISIS_GFC_MARKET_DROP,
-    CRISIS_COVID_START, CRISIS_COVID_END, CRISIS_COVID_MARKET_DROP,
-    YFINANCE_PROGRESS_BAR, YFINANCE_AUTO_ADJUST,
+    CRISIS_DOTCOM_START,
+    CRISIS_DOTCOM_END,
+    CRISIS_DOTCOM_MARKET_DROP,
+    CRISIS_GFC_START,
+    CRISIS_GFC_END,
+    CRISIS_GFC_MARKET_DROP,
+    CRISIS_COVID_START,
+    CRISIS_COVID_END,
+    CRISIS_COVID_MARKET_DROP,
+)
+from utils.portfolio_utils import (
+    fetch_historical_data,
+    calculate_portfolio_weights,
+    format_currency,
+    format_currency_with_sign,
+    validate_tickers,
+    display_and_save_results,
 )
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s: %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -84,74 +93,15 @@ def fetch_historical_prices(
     tickers: List[str], start_date: str, end_date: str
 ) -> pd.DataFrame:
     """Fetch historical prices for the crisis period."""
-    try:
-        logger.debug(f"Fetching historical prices from {start_date} to {end_date}")
-        data = yf.download(
-            tickers, start=start_date, end=end_date, progress=YFINANCE_PROGRESS_BAR, auto_adjust=YFINANCE_AUTO_ADJUST
-        )
+    logger.debug(f"Fetching historical prices from {start_date} to {end_date}")
+    prices = fetch_historical_data(
+        tickers, start_date=start_date, end_date=end_date, return_prices=True
+    )
 
-        # Handle different data structures
-        if len(tickers) == 1:
-            # Single ticker - yfinance may return MultiIndex or regular DataFrame
-            if isinstance(data, pd.Series):
-                # If it's a Series, convert to DataFrame
-                prices = data.to_frame(name=tickers[0])
-            elif isinstance(data.columns, pd.MultiIndex):
-                # MultiIndex columns like ('Close', 'AAPL')
-                if 'Close' in [col[0] for col in data.columns]:
-                    # Extract Close prices (already a DataFrame)
-                    prices = data['Close']
-                    # Rename column to just the ticker name
-                    if isinstance(prices, pd.DataFrame):
-                        prices.columns = [tickers[0]]
-                    else:
-                        prices = prices.to_frame(name=tickers[0])
-                else:
-                    prices = data.iloc[:, 0].to_frame(name=tickers[0])
-            elif "Close" in data.columns:
-                # Regular DataFrame with Close column
-                prices = data["Close"].to_frame(name=tickers[0])
-            else:
-                # Already a DataFrame with price data
-                prices = data
-                if prices.shape[1] == 1 and prices.columns[0] != tickers[0]:
-                    prices.columns = [tickers[0]]
-        else:
-            # Multiple tickers - returns MultiIndex DataFrame
-            if isinstance(data.columns, pd.MultiIndex):
-                # Extract Close prices from MultiIndex
-                prices = data['Close']
-            elif "Close" in data.columns:
-                prices = data["Close"]
-            elif "Adj Close" in data.columns:
-                prices = data["Adj Close"]
-            else:
-                # Data might already be just the Close prices
-                prices = data
-
-        return prices
-
-    except Exception as e:
-        logger.error(f"Error fetching historical data for period {start_date} to {end_date}: {e}")
-        print(f"❌ Error fetching historical data for period {start_date} to {end_date}: {e}", file=sys.stderr)
+    if prices is None:
         print(f"   Tickers: {', '.join(tickers)}", file=sys.stderr)
-        return None
 
-
-def format_currency(value: float) -> str:
-    """Format currency values with proper sign placement: -$1,234.56 not $-1,234.56"""
-    if value < 0:
-        return f"-${abs(value):,.2f}"
-    else:
-        return f"${value:,.2f}"
-
-
-def format_currency_with_sign(value: float) -> str:
-    """Format currency with explicit +/- sign: +$1,234.56 or -$1,234.56"""
-    if value < 0:
-        return f"-${abs(value):,.2f}"
-    else:
-        return f"+${value:,.2f}"
+    return prices
 
 
 def calculate_max_drawdown(prices: pd.Series) -> float:
@@ -165,7 +115,7 @@ def calculate_portfolio_stress(
     prices: pd.DataFrame,
     weights: np.ndarray,
     portfolio_value: float,
-    scenario_name: str
+    scenario_name: str,
 ) -> StressTestResult:
     """Calculate portfolio-level stress test considering correlations."""
     # Calculate returns for each asset
@@ -194,7 +144,7 @@ def calculate_portfolio_stress(
         position_value_start=start_value,
         position_value_end=end_value,
         loss_amount=loss_amount,
-        max_drawdown=max_dd
+        max_drawdown=max_dd,
     )
 
 
@@ -284,57 +234,34 @@ def run_stress_test(args):
     logger.info("Starting Historical Stress Test Analysis")
     print("🔬 Running Historical Stress Test Analysis...\n")
 
-    tickers = [t.upper() for t in args.tickers]
+    tickers = validate_tickers(args.tickers)
 
-    # Determine weights and values
-    if hasattr(args, 'values') and args.values:
-        # Value-based input
-        if len(args.values) != len(tickers):
-            logger.error(f"Number of values ({len(args.values)}) must match number of tickers ({len(tickers)})")
-            print(
-                f"❌ Error: Number of values ({len(args.values)}) must match number of tickers ({len(tickers)})",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+    # Determine weights and values using shared utility
+    try:
+        weights, portfolio_value = calculate_portfolio_weights(
+            tickers,
+            weights=getattr(args, "weights", None),
+            values=getattr(args, "values", None),
+            portfolio_value=getattr(args, "portfolio_value", None),
+        )
+        args.portfolio_value = portfolio_value
 
-        total_value = sum(args.values)
-        weights = np.array([v / total_value for v in args.values])
-        args.portfolio_value = total_value
-
-        logger.info(f"Using value-based allocation: Total portfolio value = ${total_value:,.2f}")
-        print(f"Portfolio Value: ${total_value:,.2f}")
+        # Display portfolio configuration
+        print(f"Portfolio Value: ${portfolio_value:,.2f}")
         print(f"Tickers: {', '.join(tickers)}")
-        print(f"Position Values: {', '.join(f'{t}=${v:,.2f}' for t, v in zip(tickers, args.values))}\n")
-
-    elif hasattr(args, 'weights') and args.weights:
-        # Weight-based input
-        if len(args.weights) != len(tickers):
-            logger.error(f"Number of weights ({len(args.weights)}) must match number of tickers ({len(tickers)})")
+        if hasattr(args, "values") and args.values:
             print(
-                f"❌ Error: Number of weights ({len(args.weights)}) must match number of tickers ({len(tickers)})",
-                file=sys.stderr,
+                f"Position Values: {', '.join(f'{t}=${v:,.2f}' for t, v in zip(tickers, args.values))}\n"
             )
-            sys.exit(1)
-        if not np.isclose(sum(args.weights), 1.0):
-            logger.error(f"Weights must sum to 1.0 (currently sum to {sum(args.weights):.4f})")
-            print(
-                f"❌ Error: Weights must sum to 1.0 (currently sum to {sum(args.weights):.4f})",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        weights = np.array(args.weights)
+        elif hasattr(args, "weights") and args.weights:
+            print(f"Weights: {', '.join(f'{w:.1%}' for w in weights)}\n")
+        else:
+            print(f"Weights: {', '.join(f'{w:.1%}' for w in weights)}\n")
 
-        logger.info(f"Using weight-based allocation: {', '.join(f'{t}={w:.1%}' for t, w in zip(tickers, weights))}")
-        print(f"Portfolio Value: ${args.portfolio_value:,.2f}")
-        print(f"Tickers: {', '.join(tickers)}")
-        print(f"Weights: {', '.join(f'{w:.1%}' for w in weights)}\n")
-    else:
-        # Equal weights (default)
-        weights = np.array([1.0 / len(tickers)] * len(tickers))
-        logger.info(f"Using equal weights for {len(tickers)} ticker(s)")
-        print(f"Portfolio Value: ${args.portfolio_value:,.2f}")
-        print(f"Tickers: {', '.join(tickers)}")
-        print(f"Weights: {', '.join(f'{w:.1%}' for w in weights)}\n")
+    except ValueError as e:
+        logger.error(str(e))
+        print(f"❌ Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # Determine which scenarios to run
     if args.scenario == "all":
@@ -353,7 +280,9 @@ def run_stress_test(args):
 
         if scenario_results:
             # Separate individual and portfolio results
-            individual_results = [r for r in scenario_results if r.ticker != "PORTFOLIO"]
+            individual_results = [
+                r for r in scenario_results if r.ticker != "PORTFOLIO"
+            ]
             portfolio_result = [r for r in scenario_results if r.ticker == "PORTFOLIO"]
 
             # Display individual asset results
@@ -378,10 +307,16 @@ def run_stress_test(args):
             if portfolio_result:
                 # Use correlation-based portfolio calculation
                 port = portfolio_result[0]
-                print(f"   Portfolio Return (with correlations): {port.return_pct:+.2f}%")
-                print(f"   Portfolio Gain/Loss: {format_currency_with_sign(port.loss_amount)}")
+                print(
+                    f"   Portfolio Return (with correlations): {port.return_pct:+.2f}%"
+                )
+                print(
+                    f"   Portfolio Gain/Loss: {format_currency_with_sign(port.loss_amount)}"
+                )
                 print(f"   Portfolio Max Drawdown: {port.max_drawdown:.2f}%")
-                print(f"   Final Portfolio Value: {format_currency(port.position_value_end)}")
+                print(
+                    f"   Final Portfolio Value: {format_currency(port.position_value_end)}"
+                )
             else:
                 # Fallback for single ticker
                 total_gain = sum(r.loss_amount for r in individual_results)
@@ -417,12 +352,11 @@ def run_stress_test(args):
         ]
     )
 
-    # Save to CSV
-    df.to_csv(args.out, index=False)
-    print(f"\n✅ Results saved to {args.out}")
+    # Display and save results
+    display_and_save_results(df, args.out, separator=False)
 
     # Summary insights
-    print(f"\n💡 Key Insights:")
+    print(f"💡 Key Insights:")
     worst_scenario = min(
         all_results, key=lambda x: x.loss_amount
     )  # Most negative = worst loss
